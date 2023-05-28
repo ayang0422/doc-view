@@ -1,22 +1,23 @@
 package com.liuzhihang.doc.view.service.impl;
 
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.Service;
-import com.intellij.openapi.components.ServiceManager;
+import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.project.Project;
 import com.liuzhihang.doc.view.DocViewBundle;
 import com.liuzhihang.doc.view.config.ShowDocSettings;
+import com.liuzhihang.doc.view.config.ShowDocSettingsConfigurable;
 import com.liuzhihang.doc.view.dto.DocView;
 import com.liuzhihang.doc.view.dto.DocViewData;
-import com.liuzhihang.doc.view.facade.ShowDocFacadeService;
-import com.liuzhihang.doc.view.facade.dto.ShowDocUpdateRequest;
-import com.liuzhihang.doc.view.facade.dto.ShowDocUpdateResponse;
-import com.liuzhihang.doc.view.facade.impl.ShowDocFacadeServiceImpl;
+import com.liuzhihang.doc.view.integration.ShowDocFacadeService;
+import com.liuzhihang.doc.view.integration.dto.ShowDocUpdateRequest;
+import com.liuzhihang.doc.view.integration.dto.ShowDocUpdateResponse;
+import com.liuzhihang.doc.view.integration.impl.ShowDocFacadeServiceImpl;
 import com.liuzhihang.doc.view.notification.DocViewNotification;
-import com.liuzhihang.doc.view.service.ShowDocService;
+import com.liuzhihang.doc.view.service.DocViewUploadService;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.NotNull;
-
-import java.util.List;
 
 /**
  * @author liuzhihang
@@ -24,19 +25,26 @@ import java.util.List;
  */
 @Slf4j
 @Service
-public class ShowDocServiceImpl implements ShowDocService {
+public class ShowDocServiceImpl implements DocViewUploadService {
+
 
     @Override
-    public void upload(@NotNull Project project, @NotNull List<DocView> docViewList) {
+    public boolean checkSettings(@NotNull Project project) {
+        ShowDocSettings apiSettings = ShowDocSettings.getInstance(project);
 
-        for (DocView docView : docViewList) {
-            upload(project, docView);
+        if (StringUtils.isBlank(apiSettings.getUrl())
+                || StringUtils.isBlank(apiSettings.getApiKey())
+                || StringUtils.isBlank(apiSettings.getApiToken())) {
+            // 说明没有配置 ShowDoc 上传地址, 跳转到配置页面
+            DocViewNotification.notifyError(project, DocViewBundle.message("notify.showdoc.info.settings"));
+            ShowSettingsUtil.getInstance().showSettingsDialog(project, ShowDocSettingsConfigurable.class);
+            return false;
         }
-
+        return true;
     }
 
     @Override
-    public void upload(@NotNull Project project, @NotNull DocView docView) {
+    public void doUpload(@NotNull Project project, @NotNull DocView docView) {
 
         try {
             ShowDocSettings settings = ShowDocSettings.getInstance(project);
@@ -49,14 +57,14 @@ public class ShowDocServiceImpl implements ShowDocService {
             request.setPageTitle(docView.getName());
             request.setPageContent(DocViewData.markdownText(project, docView));
 
-            ShowDocFacadeService facadeService = ServiceManager.getService(ShowDocFacadeServiceImpl.class);
+            ShowDocFacadeService facadeService = ApplicationManager.getApplication().getService(ShowDocFacadeServiceImpl.class);
             ShowDocUpdateResponse response = facadeService.updateByApi(request);
 
             ShowDocUpdateResponse.DataInner data = response.getData();
 
             String showDocInterfaceUrl = settings.getUrl() + "/" + data.getItemId() + "/" + data.getPageId();
 
-            DocViewNotification.notifyInfo(project, DocViewBundle.message("notify.showdoc.upload.success", showDocInterfaceUrl));
+            DocViewNotification.uploadSuccess(project, "ShowDoc", showDocInterfaceUrl);
         } catch (Exception e) {
             DocViewNotification.notifyError(project, DocViewBundle.message("notify.showdoc.upload.error"));
             log.error("上传单个文档失败:{}", docView, e);

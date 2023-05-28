@@ -5,7 +5,7 @@ import com.intellij.find.editorHeaderActions.Utils;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.impl.ActionToolbarImpl;
-import com.intellij.openapi.components.ServiceManager;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.JBPopup;
@@ -14,6 +14,7 @@ import com.intellij.psi.*;
 import com.intellij.psi.javadoc.PsiDocComment;
 import com.intellij.ui.IdeBorderFactory;
 import com.intellij.ui.WindowMoveListener;
+import com.intellij.ui.treeStructure.treetable.ListTreeTableModelOnColumns;
 import com.intellij.util.ui.JBUI;
 import com.liuzhihang.doc.view.DocViewBundle;
 import com.liuzhihang.doc.view.config.Settings;
@@ -22,20 +23,18 @@ import com.liuzhihang.doc.view.constant.FieldTypeConstant;
 import com.liuzhihang.doc.view.dto.DocViewData;
 import com.liuzhihang.doc.view.dto.DocViewParamData;
 import com.liuzhihang.doc.view.service.impl.WriterService;
-import com.liuzhihang.doc.view.ui.treetable.ParamTreeTableModel;
-import com.liuzhihang.doc.view.ui.treetable.ParamTreeTableUtils;
+import com.liuzhihang.doc.view.ui.treeview.ParamTreeTableView;
 import com.liuzhihang.doc.view.utils.CustomPsiCommentUtils;
 import com.liuzhihang.doc.view.utils.DocViewUtils;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.jdesktop.swingx.JXTreeTable;
-import org.jdesktop.swingx.treetable.DefaultMutableTreeTableNode;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import javax.swing.tree.DefaultMutableTreeNode;
 import java.awt.*;
 import java.awt.event.MouseEvent;
 import java.util.Arrays;
@@ -57,7 +56,7 @@ public class DocEditorForm {
     @NonNls
     public static final String DOC_VIEW_POPUP = "com.intellij.docview.editor.popup";
     private static final AtomicBoolean myIsPinned = new AtomicBoolean(true);
-    private final WriterService writerService = ServiceManager.getService(WriterService.class);
+    private final WriterService writerService = ApplicationManager.getApplication().getService(WriterService.class);
 
     private final DocViewData docViewData;
 
@@ -83,10 +82,9 @@ public class DocEditorForm {
     private JTextArea methodTextArea;
 
     private JScrollPane requestParamScrollPane;
-    private JXTreeTable requestTreeTable;
-
     private JScrollPane responseParamScrollPane;
-    private JXTreeTable responseTreeTable;
+    private ParamTreeTableView requestTableView;
+    private ParamTreeTableView responseTableView;
 
     private JBPopup popup;
 
@@ -182,42 +180,52 @@ public class DocEditorForm {
     private void initRequestParamTable() {
 
         // 边框
-        responseParamScrollPane.setBorder(JBUI.Borders.empty());
+        requestParamScrollPane.setBorder(JBUI.Borders.empty());
 
+        DefaultMutableTreeNode root = new DefaultMutableTreeNode();
 
-        DocViewParamData paramData = new DocViewParamData();
+        if (CollectionUtils.isNotEmpty(docViewData.getRequestBodyDataList())) {
+            convertToTreeNode(root, docViewData.getRequestBodyDataList());
+        } else {
+            convertToTreeNode(root, docViewData.getRequestParamDataList());
+        }
 
-        DefaultMutableTreeTableNode rootNode = new DefaultMutableTreeTableNode(paramData);
-        ParamTreeTableUtils.createTreeData(rootNode, docViewData.getResponseParamDataList());
+        ListTreeTableModelOnColumns model = new ListTreeTableModelOnColumns(root, ParamTreeTableView.COLUMN_INFOS);
 
-        ParamTreeTableModel treeTableModel = new ParamTreeTableModel(rootNode);
+        requestTableView = new ParamTreeTableView(model);
 
-        requestTreeTable = new JXTreeTable(treeTableModel);
-
-        ParamTreeTableUtils.render(requestTreeTable);
-
-        responseParamScrollPane.setViewportView(requestTreeTable);
+        requestParamScrollPane.setViewportView(requestTableView);
 
     }
 
     private void initResponseParamTable() {
 
         // 边框
-        requestParamScrollPane.setBorder(JBUI.Borders.empty());
+        responseParamScrollPane.setBorder(JBUI.Borders.empty());
 
-        DocViewParamData paramData = new DocViewParamData();
+        DefaultMutableTreeNode root = new DefaultMutableTreeNode();
 
-        DefaultMutableTreeTableNode rootNode = new DefaultMutableTreeTableNode(paramData);
-        ParamTreeTableUtils.createTreeData(rootNode, docViewData.getRequestBodyDataList());
+        convertToTreeNode(root, docViewData.getResponseParamDataList());
 
-        ParamTreeTableModel treeTableModel = new ParamTreeTableModel(rootNode);
+        ListTreeTableModelOnColumns model = new ListTreeTableModelOnColumns(root, ParamTreeTableView.COLUMN_INFOS);
 
-        responseTreeTable = new JXTreeTable(treeTableModel);
+        responseTableView = new ParamTreeTableView(model);
 
-        ParamTreeTableUtils.render(responseTreeTable);
+        responseParamScrollPane.setViewportView(responseTableView);
 
-        requestParamScrollPane.setViewportView(responseTreeTable);
+    }
 
+    private void convertToTreeNode(DefaultMutableTreeNode root, List<DocViewParamData> paramDataList) {
+
+        for (DocViewParamData data : paramDataList) {
+            DefaultMutableTreeNode node = new DefaultMutableTreeNode(data);
+            root.add(node);
+
+            if (data.getChildList() != null && data.getChildList().size() > 0) {
+                convertToTreeNode(node, data.getChildList());
+            }
+
+        }
     }
 
 
@@ -380,16 +388,15 @@ public class DocEditorForm {
             @Override
             public void actionPerformed(@NotNull AnActionEvent e) {
 
-                if (requestTreeTable.isEditing()) {
-                    requestTreeTable.getCellEditor().stopCellEditing();
+                if (requestTableView.isEditing()) {
+                    requestTableView.getCellEditor().stopCellEditing();
                 }
-                if (responseTreeTable.isEditing()) {
-                    responseTreeTable.getCellEditor().stopCellEditing();
+                if (requestTableView.isEditing()) {
+                    requestTableView.getCellEditor().stopCellEditing();
                 }
                 generateMethodComment();
 
-                DocViewUtils.writeComment(project, ((ParamTreeTableModel) requestTreeTable.getTreeTableModel()).getModifiedMap());
-                DocViewUtils.writeComment(project, ((ParamTreeTableModel) responseTreeTable.getTreeTableModel()).getModifiedMap());
+                DocViewUtils.writeComment(project, requestTableView.getModifiedMap());
 
                 popup.cancel();
             }

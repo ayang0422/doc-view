@@ -1,22 +1,37 @@
 package com.liuzhihang.doc.view.utils;
 
 import com.intellij.codeInsight.AnnotationUtil;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.WriteCommandAction;
-import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.project.Project;
-import com.intellij.psi.*;
+import com.intellij.psi.JavaPsiFacade;
+import com.intellij.psi.PsiAnnotation;
+import com.intellij.psi.PsiAnnotationMemberValue;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiComment;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiElementFactory;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiMethod;
+import com.intellij.psi.PsiModifier;
+import com.intellij.psi.PsiNameValuePair;
+import com.intellij.psi.PsiParameter;
+import com.intellij.psi.PsiType;
 import com.intellij.psi.javadoc.PsiDocComment;
 import com.intellij.psi.javadoc.PsiDocTag;
 import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.liuzhihang.doc.view.config.Settings;
+import com.liuzhihang.doc.view.constant.SpringConstant;
 import com.liuzhihang.doc.view.constant.SwaggerConstant;
 import com.liuzhihang.doc.view.dto.DocViewParamData;
 import com.liuzhihang.doc.view.service.impl.WriterService;
 import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -30,6 +45,59 @@ import java.util.Set;
 public class DocViewUtils {
 
     private DocViewUtils() {
+    }
+
+    /**
+     * 判断是否是 DocView  的类
+     *
+     * @param psiClass
+     * @return
+     */
+    public static boolean isDocViewClass(@Nullable PsiClass psiClass) {
+
+        if (psiClass == null || psiClass.isAnnotationType() || psiClass.isEnum()) {
+            return false;
+        }
+
+        // Spring Controller 还需要检查方法是否满足条件
+        if (SpringPsiUtils.isSpringClass(psiClass)) {
+            return true;
+        }
+
+        if (psiClass.isInterface()) {
+            return Settings.getInstance(psiClass.getProject()).getIncludeNormalInterface()
+                    || DubboPsiUtils.isDubboClass(psiClass)
+                    || FeignPsiUtil.isFeignClass(psiClass);
+        }
+
+        // 其他判断在下面添加
+
+        return false;
+    }
+
+    /**
+     * 判断当前方法是不是 Doc View 的方法
+     *
+     * @param psiMethod
+     * @return
+     */
+    public static boolean isDocViewMethod(@Nullable PsiMethod psiMethod) {
+
+        if (psiMethod == null) {
+            return false;
+        }
+
+        if (SpringPsiUtils.isSpringMethod(psiMethod)) {
+            return true;
+        }
+
+        if (DubboPsiUtils.isDubboMethod(psiMethod)) {
+            return true;
+        }
+
+        // 其他判断在下面添加
+
+        return false;
     }
 
     /**
@@ -48,7 +116,7 @@ public class DocViewUtils {
 
         if (settings.getTitleUseCommentTag()) {
             // 注释 @DocView.Title
-            String docTitleTagValue = CustomPsiCommentUtils.getDocComment(psiClass.getDocComment(), settings.getTitleTag());
+            String docTitleTagValue = CustomPsiCommentUtils.tagDocComment(psiClass.getDocComment(), settings.getTitleTag());
 
             if (StringUtils.isNotBlank(docTitleTagValue)) {
                 return docTitleTagValue;
@@ -58,7 +126,7 @@ public class DocViewUtils {
         if (settings.getTitleClassComment()) {
             // 获取类注释
 
-            String comment = CustomPsiCommentUtils.getDocComment(psiClass.getDocComment());
+            String comment = CustomPsiCommentUtils.tagDocComment(psiClass.getDocComment());
 
             if (StringUtils.isNotBlank(comment)) {
                 return comment;
@@ -91,7 +159,9 @@ public class DocViewUtils {
      * <p>
      * 支持 Swagger/方法名/自定义注释 tag
      *
-     * @param psiMethod
+     * 如果是方法注释, 则限制 15 个字符
+     *
+     * @param psiMethod 当前方法
      * @return
      */
     @NotNull
@@ -121,7 +191,7 @@ public class DocViewUtils {
 
         // 注释上的 tag
         if (settings.getNameUseCommentTag()) {
-            String comment = CustomPsiCommentUtils.getDocComment(psiMethod.getDocComment(), settings.getNameTag());
+            String comment = CustomPsiCommentUtils.tagDocComment(psiMethod.getDocComment(), settings.getNameTag());
 
             if (StringUtils.isNotBlank(comment)) {
                 return comment;
@@ -129,11 +199,16 @@ public class DocViewUtils {
         }
 
         if (settings.getNameMethodComment()) {
-            // 获取类注释
 
-            String comment = CustomPsiCommentUtils.getDocComment(psiMethod.getDocComment());
+            // 方法注释
+            String comment = CustomPsiCommentUtils.tagDocComment(psiMethod.getDocComment(), true);
 
             if (StringUtils.isNotBlank(comment)) {
+
+                if (comment.length() > 15) {
+                    comment = comment.substring(0, 15);
+                }
+
                 return comment;
             }
         }
@@ -176,15 +251,14 @@ public class DocViewUtils {
         }
         // 最后从注释中获取
 
-        return CustomPsiCommentUtils.getDocComment(psiMethod.getDocComment());
+        return CustomPsiCommentUtils.tagDocComment(psiMethod.getDocComment());
     }
-
 
     /**
      * 判断是否是需要排除的字段
      *
      * @param psiField
-     * @return
+     * @return 需要排除字段, 返回 true
      */
     @NotNull
     public static boolean isExcludeField(@NotNull PsiField psiField) {
@@ -199,14 +273,47 @@ public class DocViewUtils {
             return true;
         }
 
+        if (CustomPsiUtils.hasModifierProperty(psiField, PsiModifier.TRANSIENT)) {
+            return true;
+        }
+
         // 排除部分注解的字段
         if (AnnotationUtil.isAnnotated(psiField, settings.getExcludeFieldAnnotation(), 0)) {
             return true;
         }
 
-        return false;
+        PsiClass containingClass = psiField.getContainingClass();
+        if (containingClass == null) {
+            return true;
+        }
+
+        return excludeClassPackage(containingClass, settings);
     }
 
+    /**
+     * 是否在需要排除的包内
+     *
+     * @param psiClass
+     * @param settings
+     * @return 需要排除 返回 true
+     */
+    private static boolean excludeClassPackage(@NotNull PsiClass psiClass, @NotNull Settings settings) {
+
+        String qualifiedName = psiClass.getQualifiedName();
+
+        if (qualifiedName == null) {
+            return true;
+        }
+
+        for (String packagePrefix : settings.getExcludeClassPackage()) {
+
+            if (qualifiedName.startsWith(packagePrefix)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /**
      * 判断是否是需要排除的字段
@@ -237,7 +344,6 @@ public class DocViewUtils {
         return false;
     }
 
-
     /**
      * 判断字段是否必填
      *
@@ -251,7 +357,6 @@ public class DocViewUtils {
         if (AnnotationUtil.isAnnotated(psiField, settings.getRequiredFieldAnnotation(), 0)) {
             return true;
         }
-
 
         // swagger v3 @Schema
         PsiAnnotation schemaAnnotation = psiField.getAnnotation(SwaggerConstant.SCHEMA);
@@ -295,9 +400,28 @@ public class DocViewUtils {
 
         Settings settings = Settings.getInstance(psiParameter.getProject());
 
-        return AnnotationUtil.isAnnotated(psiParameter, settings.getRequiredFieldAnnotation(), 0);
-    }
+        // 必填标识
+        if (AnnotationUtil.isAnnotated(psiParameter, settings.getRequiredFieldAnnotation(), 0)) {
+            return true;
+        }
 
+        if (AnnotationUtil.isAnnotated(psiParameter, SpringConstant.REQUEST_PARAM, 0)) {
+            PsiAnnotation annotation = psiParameter.getAnnotation(SpringConstant.REQUEST_PARAM);
+            if (annotation != null) {
+                // 没有设置注解参数
+                PsiNameValuePair[] nameValuePairs = annotation.getParameterList().getAttributes();
+                for (PsiNameValuePair nameValuePair : nameValuePairs) {
+                    if (nameValuePair.getAttributeName().equalsIgnoreCase("required")
+                            && Objects.requireNonNull(nameValuePair.getLiteralValue()).equalsIgnoreCase("false")) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /**
      * 获取字段的描述
@@ -327,16 +451,15 @@ public class DocViewUtils {
             }
         }
 
-
         PsiComment comment = PsiTreeUtil.findChildOfType(psiField, PsiComment.class);
 
         if (comment != null) {
             // param.setExample();
             // 参数举例, 使用 tag 判断
             if (comment instanceof PsiDocComment) {
-                return CustomPsiCommentUtils.getDocComment((PsiDocComment) comment);
+                return CustomPsiCommentUtils.tagDocComment((PsiDocComment) comment);
             }
-            return CustomPsiCommentUtils.getComment(comment);
+            return CustomPsiCommentUtils.fieldComment(comment);
         }
         return "";
     }
@@ -422,11 +545,9 @@ public class DocViewUtils {
 
             PsiElementFactory factory = PsiElementFactory.getInstance(project);
             PsiDocComment psiDocComment = factory.createDocCommentFromText(docComment);
-            ServiceManager.getService(WriterService.class).write(project, element, psiDocComment);
-
+            ApplicationManager.getApplication().getService(WriterService.class).write(project, element, psiDocComment);
 
         }
     }
-
 
 }

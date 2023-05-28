@@ -1,7 +1,9 @@
 package com.liuzhihang.doc.view.dto;
 
 import com.intellij.openapi.project.Project;
+import com.liuzhihang.doc.view.config.Settings;
 import com.liuzhihang.doc.view.config.TemplateSettings;
+import com.liuzhihang.doc.view.enums.FrameworkEnum;
 import com.liuzhihang.doc.view.utils.VelocityUtils;
 import lombok.Data;
 import org.apache.commons.collections.CollectionUtils;
@@ -49,7 +51,6 @@ public class DocViewData {
      */
     private final String method;
 
-
     /**
      * headers
      */
@@ -60,16 +61,18 @@ public class DocViewData {
     /**
      * 请求参数
      */
-    private final List<DocViewParamData> requestDocViewParamDataList;
+    private final List<DocViewParamData> requestParamDataList;
 
     private final String requestParam;
-
 
     /**
      * 请求参数
      */
     private final List<DocViewParamData> requestBodyDataList;
 
+    /**
+     * 请求中 body 参数
+     */
     private final String requestBody;
 
     /**
@@ -81,8 +84,7 @@ public class DocViewData {
      * 返回参数
      */
     private final List<DocViewParamData> responseParamDataList;
-    private final String responseParam;
-
+    private final String                 responseParam;
 
     /**
      * 返回示例
@@ -97,21 +99,21 @@ public class DocViewData {
         this.desc = docView.getDesc();
         this.path = docView.getPath();
         this.method = docView.getMethod();
-        this.type = docView.getType();
+        this.type = docView.getType().toString();
 
         this.requestHeaderDataList = headerDataList(docView.getHeaderList());
         this.requestHeader = headerMarkdown(requestHeaderDataList);
 
-        this.requestDocViewParamDataList = paramDataList(docView.getReqParamList());
-        this.requestParam = paramMarkdown(requestDocViewParamDataList);
+        this.requestParamDataList = paramDataList(docView.getReqParamList());
+        this.requestParam = paramMarkdown(requestParamDataList);
 
-        this.requestBodyDataList = buildBodyDataList(docView.getReqRootBody().getChildList());
+        this.requestBodyDataList = buildBodyDataList(docView.getReqBody().getChildList());
         this.requestBody = paramMarkdown(requestBodyDataList);
-        this.requestExample = buildReqExample(docView.getReqExampleType(), docView.getReqExample());
+        this.requestExample = requestExample(docView);
 
-        this.responseParamDataList = buildBodyDataList(docView.getRespRootBody().getChildList());
+        this.responseParamDataList = buildBodyDataList(docView.getRespBody().getChildList());
         this.responseParam = paramMarkdown(responseParamDataList);
-        this.responseExample = buildRespExample(docView.getReqExampleType(), docView.getRespExample());
+        this.responseExample = respBodyExample(docView.getRespExample());
 
     }
 
@@ -125,7 +127,7 @@ public class DocViewData {
 
         DocViewData docViewData = new DocViewData(docView);
 
-        if (docView.getType().equalsIgnoreCase("Dubbo")) {
+        if (docView.getType() == FrameworkEnum.DUBBO) {
             return VelocityUtils.convert(TemplateSettings.getInstance(project).getDubboTemplate(), docViewData);
         } else {
             // 按照 Spring 模版
@@ -146,9 +148,9 @@ public class DocViewData {
             return "";
         }
 
-        return "|参数名|类型|必选|描述|\n" +
-                "|:-----|:-----|:-----|:-----|\n" +
-                paramMarkdownContent(dataList);
+        return "|参数名|类型|必选|描述|\n"
+                + "|:-----|:-----|:-----|:-----|\n"
+                + paramMarkdownContent(dataList);
     }
 
     /**
@@ -159,7 +161,7 @@ public class DocViewData {
         StringBuilder builder = new StringBuilder();
 
         for (DocViewParamData data : dataList) {
-            builder.append("|").append(data.getPrefix()).append(data.getName())
+            builder.append("|").append(data.getPrefixSymbol1()).append(data.getPrefixSymbol2()).append(data.getName())
                     .append("|").append(data.getType())
                     .append("|").append(data.getRequired() ? "Y" : "N")
                     .append("|").append(data.getDesc())
@@ -172,10 +174,8 @@ public class DocViewData {
         return builder;
     }
 
-
     @NotNull
     private static String headerMarkdown(List<DocViewParamData> dataList) {
-
 
         if (CollectionUtils.isEmpty(dataList)) {
             return "";
@@ -191,12 +191,10 @@ public class DocViewData {
                     .append("|").append("\n");
         }
 
-
-        return "|参数名|参数值|必填|描述|\n" +
-                "|:-----|:-----|:-----|:-----|\n" +
-                builder;
+        return "|参数名|参数值|必填|描述|\n"
+                + "|:-----|:-----|:-----|:-----|\n"
+                + builder;
     }
-
 
     private List<DocViewParamData> headerDataList(List<Header> headerList) {
 
@@ -249,18 +247,18 @@ public class DocViewData {
             return new ArrayList<>();
         }
 
-        return buildBodyDataList(bodyList, "");
+        return buildBodyDataList(bodyList, "", "");
     }
-
 
     /**
      * 递归 body 生成 List<ParamData>
      *
      * @param bodyList
-     * @param prefix
+     * @param prefixSymbol1,
+     * @param prefixSymbol2
      */
     @NotNull
-    private static List<DocViewParamData> buildBodyDataList(@NotNull List<Body> bodyList, String prefix) {
+    private static List<DocViewParamData> buildBodyDataList(@NotNull List<Body> bodyList, String prefixSymbol1, String prefixSymbol2) {
 
         List<DocViewParamData> dataList = new ArrayList<>();
 
@@ -274,32 +272,91 @@ public class DocViewData {
             data.setType(body.getType());
             data.setDesc(StringUtils.isNotBlank(body.getDesc()) ? body.getDesc() : "");
 
-            data.setPrefix(prefix);
+            data.setPrefixSymbol1(prefixSymbol1);
+            data.setPrefixSymbol2(prefixSymbol2);
 
             if (CollectionUtils.isNotEmpty(body.getChildList())) {
-                data.setChildList(buildBodyDataList(body.getChildList(), prefix + "-->"));
+
+                Settings settings = Settings.getInstance(body.getPsiElement().getProject());
+
+                data.setChildList(
+                        buildBodyDataList(body.getChildList(), settings.getPrefixSymbol1(), prefixSymbol2 + settings.getPrefixSymbol2()));
             }
             dataList.add(data);
         }
         return dataList;
     }
 
-
     @NotNull
-    @Contract(pure = true)
-    private String buildReqExample(String reqExampleType, String reqExample) {
+    private String requestExample(DocView docView) {
 
-        return "```" + reqExampleType + "\n" +
-                (reqExample == null ? "" : reqExample) + "\n" +
+        String reqFormExample = reqFormExample(docView.getReqFormExample());
+
+        String reqBodyExample = reqBodyExample(docView.getReqBodyExample());
+
+        if (StringUtils.isBlank(reqFormExample)) {
+            return reqBodyExample;
+        }
+
+        if (StringUtils.isBlank(reqBodyExample)) {
+            return reqFormExample;
+        }
+
+        return reqFormExample + "\n\n" + reqBodyExample;
+    }
+
+    /**
+     * 请求参数中的 Form 示例
+     *
+     * @param reqFormExample
+     * @return
+     */
+    private String reqFormExample(String reqFormExample) {
+        if (StringUtils.isBlank(reqFormExample)) {
+            return "";
+        }
+
+        return "```Form\n" +
+                reqFormExample + "\n" +
                 "```";
     }
 
+    /**
+     * 请求参数中的 Body 示例
+     *
+     * @param reqBodyExample Body
+     * @return 组装结果
+     */
     @NotNull
     @Contract(pure = true)
-    private String buildRespExample(String respExampleType, String respExample) {
-        return "```json\n" +
-                (respExampleType == null ? "" : respExample) + "\n" +
-                "```\n\n";
+    private String reqBodyExample(String reqBodyExample) {
+
+        if (StringUtils.isBlank(reqBodyExample)) {
+            return "";
+        }
+
+        return "```JSON\n"
+                + reqBodyExample + "\n"
+                + "```";
+    }
+
+    /**
+     * 构建返回 body
+     *
+     * @param respExample 返回示例
+     * @return 返回body
+     */
+    @NotNull
+    @Contract(pure = true)
+    private String respBodyExample(String respExample) {
+
+        if (StringUtils.isBlank(respExample)) {
+            return "";
+        }
+
+        return "```JSON\n"
+                + respExample + "\n"
+                + "```\n\n";
     }
 
 }

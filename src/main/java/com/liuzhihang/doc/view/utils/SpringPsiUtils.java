@@ -1,8 +1,13 @@
 package com.liuzhihang.doc.view.utils;
 
 import com.intellij.codeInsight.AnnotationUtil;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.module.Module;
+import com.intellij.openapi.util.Computable;
 import com.intellij.psi.*;
+import com.intellij.psi.impl.java.stubs.index.JavaAnnotationIndex;
 import com.intellij.psi.javadoc.PsiDocComment;
+import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.psi.util.PsiTypesUtil;
 import com.intellij.psi.util.PsiUtil;
@@ -12,132 +17,246 @@ import com.liuzhihang.doc.view.constant.SpringConstant;
 import com.liuzhihang.doc.view.dto.Body;
 import com.liuzhihang.doc.view.dto.Header;
 import com.liuzhihang.doc.view.dto.Param;
+import com.liuzhihang.doc.view.enums.ContentTypeEnum;
 import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import static com.liuzhihang.doc.view.constant.MethodConstant.DELETE;
+import static com.liuzhihang.doc.view.constant.MethodConstant.GET;
+import static com.liuzhihang.doc.view.constant.MethodConstant.PATCH;
+import static com.liuzhihang.doc.view.constant.MethodConstant.POST;
+import static com.liuzhihang.doc.view.constant.MethodConstant.PUT;
 
 /**
+ * Spring 相关操作工具类
+ *
  * @author liuzhihang
  * @date 2020/3/4 19:45
  */
 public class SpringPsiUtils extends ParamPsiUtils {
 
+    /**
+     * 检查类或者接口是否是 Spring 接口
+     *
+     * @param psiClass
+     * @return
+     */
+    public static boolean isSpringClass(@NotNull PsiClass psiClass) {
+
+        return ApplicationManager.getApplication().runReadAction((Computable<Boolean>) () -> {
+
+            Settings settings = Settings.getInstance(psiClass.getProject());
+
+            return AnnotationUtil.isAnnotated(psiClass, settings.getContainClassAnnotationName(), 0);
+        });
+
+    }
+
+    /**
+     * 检查方法是否满足 Spring 相关条件
+     * <p>
+     * 不是构造方法, 且 公共 非静态, 有相关注解
+     *
+     * @param psiMethod
+     * @return true 是spring 方法
+     */
+    public static boolean isSpringMethod(@NotNull PsiMethod psiMethod) {
+
+        return ApplicationManager.getApplication().runReadAction((Computable<Boolean>) () -> {
+            Settings settings = Settings.getInstance(psiMethod.getProject());
+
+            return !psiMethod.isConstructor()
+                    && CustomPsiUtils.hasModifierProperty(psiMethod, PsiModifier.PUBLIC)
+                    && !CustomPsiUtils.hasModifierProperty(psiMethod, PsiModifier.STATIC)
+                    && AnnotationUtil.isAnnotated(psiMethod, settings.getContainMethodAnnotationName(), 0);
+        });
+
+    }
+
+    /**
+     * 从 module 中获取所有符合生成 DocView 文档的类
+     *
+     * @param module 项目 Module
+     * @return 所有符合 DocView 文档类
+     */
+    public static List<PsiClass> findDocViewFromModule(Module module) {
+
+        Collection<PsiAnnotation> psiAnnotations = JavaAnnotationIndex.getInstance().get("Controller", module.getProject(),
+                GlobalSearchScope.moduleScope(module));
+        Collection<PsiAnnotation> restController = JavaAnnotationIndex.getInstance().get("RestController", module.getProject(),
+                GlobalSearchScope.moduleScope(module));
+        psiAnnotations.addAll(restController);
+        List<PsiClass> psiClasses = new LinkedList<>();
+
+        for (PsiAnnotation psiAnnotation : psiAnnotations) {
+            PsiModifierList psiModifierList = (PsiModifierList) psiAnnotation.getParent();
+            PsiElement psiElement = psiModifierList.getParent();
+
+            if (psiElement instanceof PsiClass && isSpringClass((PsiClass) psiElement)) {
+                psiClasses.add((PsiClass) psiElement);
+            }
+        }
+        return psiClasses;
+    }
+
     @NotNull
-    public static String getMethod(PsiMethod psiMethod) {
+    public static String method(PsiMethod psiMethod) {
 
         String method;
 
         if (AnnotationUtil.isAnnotated(psiMethod, SpringConstant.GET_MAPPING, 0)) {
-            method = "GET";
+            method = GET;
         } else if (AnnotationUtil.isAnnotated(psiMethod, SpringConstant.POST_MAPPING, 0)) {
-            method = "POST";
+            method = POST;
         } else if (AnnotationUtil.isAnnotated(psiMethod, SpringConstant.PUT_MAPPING, 0)) {
-            method = "PUT";
+            method = PUT;
         } else if (AnnotationUtil.isAnnotated(psiMethod, SpringConstant.DELETE_MAPPING, 0)) {
-            method = "DELETE";
+            method = DELETE;
         } else if (AnnotationUtil.isAnnotated(psiMethod, SpringConstant.PATCH_MAPPING, 0)) {
-            method = "PATCH";
+            method = PATCH;
         } else if (AnnotationUtil.isAnnotated(psiMethod, SpringConstant.REQUEST_MAPPING, 0)) {
             PsiAnnotation annotation = AnnotationUtil.findAnnotation(psiMethod, SpringConstant.REQUEST_MAPPING);
             if (annotation == null) {
-                method = "GET";
+                method = GET;
             } else {
                 String value = AnnotationUtil.getStringAttributeValue(annotation, "method");
-                method = value == null ? "GET" : value;
+                method = value == null ? GET : value;
             }
         } else {
-            method = "GET";
+            method = GET;
         }
 
-        return method;
+        return method.toUpperCase();
     }
 
     /**
      * 从类注解中解析出请求路径
      *
-     * @param psiClass
-     * @param psiMethod
-     * @return
+     * @param psiClass  类
+     * @param psiMethod 方法
+     * @return 路径, 路径开头为 /
+     * @see SpringPsiUtils#path(PsiAnnotation)
      */
     @NotNull
-    public static String getPath(PsiClass psiClass, @NotNull PsiMethod psiMethod) {
+    public static String path(PsiClass psiClass, @NotNull PsiMethod psiMethod) {
 
-        String basePath = getBasePath(psiClass);
-        String methodPath = getMethodPath(psiMethod);
+        String classPath = classPath(psiClass);
+        String methodPath = methodPath(psiMethod);
 
-        if (StringUtils.isBlank(basePath)) {
+        if (StringUtils.isBlank(classPath)) {
             return methodPath;
         }
 
         if (StringUtils.isBlank(methodPath)) {
-            return basePath;
+            return classPath;
         }
 
-        if (!methodPath.startsWith("/")) {
-            methodPath = "/" + methodPath;
-        }
-
-        String path = basePath + methodPath;
-
-        return path.replace("//", "/");
+        // 拼接最终结果
+        return classPath + methodPath;
     }
 
+    /**
+     * 获取类的路径, 比如 @RequestMapping("/xxx")
+     *
+     * @param psiClass 类
+     * @return 路径
+     */
     @NotNull
-    public static String getBasePath(PsiClass psiClass) {
+    public static String classPath(PsiClass psiClass) {
         // controller 路径
         PsiAnnotation annotation = AnnotationUtil.findAnnotation(psiClass, SpringConstant.REQUEST_MAPPING);
 
-        return getPath(annotation);
+        return path(annotation);
     }
 
+    /**
+     * 根据方法获取请求路径, 就是方法注解中写的路径
+     *
+     * @param psiMethod 方法
+     * @return 请求方式
+     */
+    public static String methodPath(PsiMethod psiMethod) {
 
-    @NotNull
-    private static String getPath(PsiAnnotation annotation) {
-        if (annotation == null) {
-            return "";
-        }
-        String value = AnnotationUtil.getStringAttributeValue(annotation, "value");
-        if (value != null) {
-            if (value.startsWith("/")) {
-                return value;
-            } else {
-                return "/" + value;
-            }
-        }
-        return "";
-    }
+        String url = "";
 
-
-    public static String getMethodPath(PsiMethod psiMethod) {
-        String url;
-
-        if (AnnotationUtil.isAnnotated(psiMethod, SpringConstant.GET_MAPPING, 0)) {
-            url = getPath(AnnotationUtil.findAnnotation(psiMethod, SpringConstant.GET_MAPPING));
-        } else if (AnnotationUtil.isAnnotated(psiMethod, SpringConstant.POST_MAPPING, 0)) {
-            url = getPath(AnnotationUtil.findAnnotation(psiMethod, SpringConstant.POST_MAPPING));
-        } else if (AnnotationUtil.isAnnotated(psiMethod, SpringConstant.PUT_MAPPING, 0)) {
-            url = getPath(AnnotationUtil.findAnnotation(psiMethod, SpringConstant.PUT_MAPPING));
-        } else if (AnnotationUtil.isAnnotated(psiMethod, SpringConstant.DELETE_MAPPING, 0)) {
-            url = getPath(AnnotationUtil.findAnnotation(psiMethod, SpringConstant.DELETE_MAPPING));
-        } else if (AnnotationUtil.isAnnotated(psiMethod, SpringConstant.PATCH_MAPPING, 0)) {
-            url = getPath(AnnotationUtil.findAnnotation(psiMethod, SpringConstant.PATCH_MAPPING));
-        } else if (AnnotationUtil.isAnnotated(psiMethod, SpringConstant.REQUEST_MAPPING, 0)) {
-            url = getPath(AnnotationUtil.findAnnotation(psiMethod, SpringConstant.REQUEST_MAPPING));
-        } else {
-            url = "";
+        // 是否包含 Spring xxxMapping 注解
+        if (AnnotationUtil.isAnnotated(psiMethod, SpringConstant.MAPPING_ANNOTATIONS, 0)) {
+            url = path(AnnotationUtil.findAnnotation(psiMethod, SpringConstant.MAPPING_ANNOTATIONS));
         }
         return url;
     }
 
+    /**
+     * 从注解中解析路径, 路径结构都为 /xxx
+     *
+     * 开头为 /
+     * 结束没有 /
+     * 空时为 ""
+     *
+     * @param annotation 需要解析路径的注解, 可能是 xxxController 也可能是 xxxMapping
+     * @return 注解 value 字段对应的路径
+     */
+    @NotNull
+    private static String path(PsiAnnotation annotation) {
+        if (annotation == null) {
+            return "";
+        }
+        // 获取注解中 value 字段对应的值
+        String path = AnnotationUtil.getStringAttributeValue(annotation, "value");
+        if (path != null) {
+            if (!path.startsWith("/")) {
+                path = "/" + path;
+            }
+
+            if (path.endsWith("/")) {
+                path = path.substring(0, path.length() - 1);
+            }
+
+            return path;
+        }
+        return "";
+    }
+
+    /**
+     * 获取当前方法的 Context-Type
+     *
+     * @param psiMethod 方法
+     * @return Context-Type
+     */
+    public static ContentTypeEnum contentType(@NotNull PsiMethod psiMethod) {
+
+        PsiParameter[] parameters = psiMethod.getParameterList().getParameters();
+
+        for (PsiParameter parameter : parameters) {
+
+            // 通用排除字段
+            if (DocViewUtils.isExcludeParameter(parameter)) {
+                continue;
+            }
+
+            if (AnnotationUtil.isAnnotated(parameter, SpringConstant.REQUEST_BODY, 0)) {
+                return ContentTypeEnum.JSON;
+            }
+        }
+        return ContentTypeEnum.FORM;
+    }
 
     /**
      * 获取被 RequestBody 注解修饰的参数, 只需要获取第一个即可, 因为多个不会生效.
      *
-     * @param psiMethod
-     * @return
+     * @param psiMethod 方法
+     * @return 被 @RequestBody 修饰的参数
      */
-    public static PsiParameter getRequestBodyParam(@NotNull PsiMethod psiMethod) {
+    public static PsiParameter requestBodyParam(@NotNull PsiMethod psiMethod) {
         PsiParameter[] parameters = psiMethod.getParameterList().getParameters();
 
         for (PsiParameter parameter : parameters) {
@@ -154,7 +273,6 @@ public class SpringPsiUtils extends ParamPsiUtils {
         return null;
     }
 
-
     /**
      * 构建 Header
      *
@@ -163,10 +281,19 @@ public class SpringPsiUtils extends ParamPsiUtils {
      */
     @NotNull
     public static List<Header> buildHeader(@NotNull PsiMethod psiMethod) {
+        List<Header> list = new ArrayList<>();
 
+        // 先设置 header 中的 contentType
+        ContentTypeEnum contentType = contentType(psiMethod);
+        Header contentTypeHeader = new Header();
+        contentTypeHeader.setRequired(true);
+        contentTypeHeader.setName(contentType.getKey());
+        contentTypeHeader.setValue(contentType.getValue());
+        list.add(contentTypeHeader);
+
+        // 判断有无 @Header 注解的参数
         PsiParameter[] parameters = psiMethod.getParameterList().getParameters();
 
-        List<Header> list = new ArrayList<>();
         for (PsiParameter parameter : parameters) {
 
             if (!AnnotationUtil.isAnnotated(parameter, SpringConstant.REQUEST_HEADER, 0)) {
@@ -176,7 +303,7 @@ public class SpringPsiUtils extends ParamPsiUtils {
             PsiType type = parameter.getType();
 
             // 不是 String 就不处理了
-            if (!type.getPresentableText().equals("String")) {
+            if (!"String".equals(type.getPresentableText())) {
                 continue;
             }
 
@@ -218,13 +345,19 @@ public class SpringPsiUtils extends ParamPsiUtils {
 
                 root.setQualifiedNameForClassType(psiClass.getQualifiedName());
 
+                // 获取请求的参数中，是否存在泛型，将泛型与原始对象存储到 map 中
+                PsiClassType psiClassType = (PsiClassType) type;
+                Map<String, PsiType> genericsMap = CustomPsiUtils.getGenericsMap(psiClassType);
+
                 for (PsiField field : psiClass.getAllFields()) {
 
                     // 通用排除字段
                     if (DocViewUtils.isExcludeField(field)) {
                         continue;
                     }
-                    ParamPsiUtils.buildBodyParam(field, null, root);
+
+                    // 增加 genericsMap 参数传入，用于将泛型 T 替换为原始对象
+                    ParamPsiUtils.buildBodyParam(field, genericsMap, root);
                 }
 
             }
@@ -233,9 +366,8 @@ public class SpringPsiUtils extends ParamPsiUtils {
         return root;
     }
 
-
     @NotNull
-    public static String getReqBodyJson(@NotNull PsiParameter parameter, @NotNull Settings settings) {
+    public static String reqBodyJson(@NotNull PsiParameter parameter, @NotNull Settings settings) {
         Map<String, Object> fieldMap = new LinkedHashMap<>();
         String name = parameter.getName();
         PsiType type = parameter.getType();
@@ -256,7 +388,6 @@ public class SpringPsiUtils extends ParamPsiUtils {
 
     }
 
-
     /**
      * 拼装为 kv 形式的键值对
      *
@@ -264,7 +395,7 @@ public class SpringPsiUtils extends ParamPsiUtils {
      * @return
      */
     @NotNull
-    public static String getReqParamKV(List<Param> requestParam) {
+    public static String reqParamKV(List<Param> requestParam) {
 
         if (requestParam == null || requestParam.isEmpty()) {
             return "";
@@ -276,9 +407,8 @@ public class SpringPsiUtils extends ParamPsiUtils {
             paramKV.append("&").append(param.getName()).append("=").append(param.getExample());
         }
 
-        return paramKV.toString();
+        return paramKV.substring(1);
     }
-
 
     public static List<Param> buildFormParam(PsiMethod psiMethod) {
 
@@ -357,63 +487,21 @@ public class SpringPsiUtils extends ParamPsiUtils {
         return param;
     }
 
-
     @NotNull
     private static Param buildPramFromParameter(PsiMethod psiMethod, PsiParameter parameter) {
 
         Param param = new Param();
-        param.setRequired(false);
-
-        if (AnnotationUtil.isAnnotated(parameter, SpringConstant.REQUEST_PARAM, 0)) {
-            PsiAnnotation annotation = parameter.getAnnotation(SpringConstant.REQUEST_PARAM);
-            assert annotation != null;
-
-            PsiNameValuePair[] nameValuePairs = annotation.getParameterList().getAttributes();
-
-            // 初始为 true
-            param.setRequired(true);
-            for (PsiNameValuePair nameValuePair : nameValuePairs) {
-
-                if (nameValuePair.getAttributeName().equalsIgnoreCase("required")
-                        && Objects.requireNonNull(nameValuePair.getLiteralValue()).equalsIgnoreCase("false")) {
-                    param.setRequired(false);
-                }
-
-            }
-        }
-
+        param.setRequired(DocViewUtils.isRequired(parameter));
         param.setName(parameter.getName());
         param.setType(parameter.getType().getPresentableText());
 
         // 备注需要从注释中获取
         PsiDocComment docComment = psiMethod.getDocComment();
         if (docComment != null) {
-            param.setDesc(CustomPsiCommentUtils.getMethodParam(docComment, parameter));
+            param.setDesc(CustomPsiCommentUtils.paramDocComment(docComment, parameter));
         }
 
-
         return param;
-    }
-
-
-    /**
-     * 检查方法是否满足 Spring 相关条件
-     * <p>
-     * 不是构造方法, 且 公共 非静态, 有相关注解
-     *
-     * @param psiMethod
-     * @return true 是spring 方法
-     */
-    public static boolean isSpringMethod(@NotNull PsiMethod psiMethod) {
-
-        Settings settings = Settings.getInstance(psiMethod.getProject());
-
-
-        return !psiMethod.isConstructor()
-                && CustomPsiUtils.hasModifierProperty(psiMethod, PsiModifier.PUBLIC)
-                && !CustomPsiUtils.hasModifierProperty(psiMethod, PsiModifier.STATIC)
-                && AnnotationUtil.isAnnotated(psiMethod, settings.getContainMethodAnnotationName(), 0);
-
     }
 
 }

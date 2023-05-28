@@ -1,7 +1,6 @@
 package com.liuzhihang.doc.view.config;
 
 import com.intellij.openapi.components.PersistentStateComponent;
-import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.project.Project;
@@ -58,6 +57,22 @@ public class Settings implements PersistentStateComponent<Settings> {
      */
     private String required = "DocView.Required";
     private Boolean requiredUseCommentTag = true;
+
+    /**
+     * 是否合并导出
+     */
+    private Boolean mergeExport = true;
+
+    /**
+     * 隐藏左侧目录
+     */
+    private Boolean hideLeft = false;
+
+    /**
+     * 是否显示边栏标记
+     */
+    private Boolean lineMarker = true;
+    private Boolean includeNormalInterface = false;
 
     /**
      * 包含类注解名称
@@ -127,8 +142,22 @@ public class Settings implements PersistentStateComponent<Settings> {
         add("org.apache.dubbo.config.annotation.DubboReference");
     }};
 
+    /**
+     * 被注解的字段需要过滤掉
+     */
+    private Set<String> excludeClassPackage = new HashSet<>() {{
+        add("com.baomidou.mybatisplus.extension.activerecord.Model");
+    }};
+
+    /**
+     * 子属性缩进符
+     */
+    private String prefixSymbol1 = "";
+    private String prefixSymbol2 = "-->";
+
+
     public static Settings getInstance(@NotNull Project project) {
-        return ServiceManager.getService(project, Settings.class);
+        return project.getService(Settings.class);
     }
 
 

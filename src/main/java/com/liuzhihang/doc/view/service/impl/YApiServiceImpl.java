@@ -1,31 +1,44 @@
 package com.liuzhihang.doc.view.service.impl;
 
 import com.google.gson.Gson;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.Service;
-import com.intellij.openapi.components.ServiceManager;
+import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.project.Project;
-import com.intellij.psi.*;
+import com.intellij.psi.CommonClassNames;
+import com.intellij.psi.PsiClass;
+import com.intellij.psi.PsiField;
+import com.intellij.psi.PsiPrimitiveType;
+import com.intellij.psi.PsiType;
 import com.intellij.psi.util.InheritanceUtil;
 import com.liuzhihang.doc.view.DocViewBundle;
 import com.liuzhihang.doc.view.config.YApiSettings;
+import com.liuzhihang.doc.view.config.YApiSettingsConfigurable;
 import com.liuzhihang.doc.view.constant.FieldTypeConstant;
 import com.liuzhihang.doc.view.dto.Body;
 import com.liuzhihang.doc.view.dto.DocView;
 import com.liuzhihang.doc.view.dto.Header;
 import com.liuzhihang.doc.view.dto.Param;
-import com.liuzhihang.doc.view.facade.YApiFacadeService;
-import com.liuzhihang.doc.view.facade.dto.YApiCat;
-import com.liuzhihang.doc.view.facade.dto.YApiHeader;
-import com.liuzhihang.doc.view.facade.dto.YApiQuery;
-import com.liuzhihang.doc.view.facade.dto.YapiSave;
-import com.liuzhihang.doc.view.facade.impl.YApiFacadeServiceImpl;
+import com.liuzhihang.doc.view.enums.ContentTypeEnum;
+import com.liuzhihang.doc.view.integration.YApiFacadeService;
+import com.liuzhihang.doc.view.integration.dto.YApiCat;
+import com.liuzhihang.doc.view.integration.dto.YApiHeader;
+import com.liuzhihang.doc.view.integration.dto.YApiQuery;
+import com.liuzhihang.doc.view.integration.dto.YapiSave;
+import com.liuzhihang.doc.view.integration.impl.YApiFacadeServiceImpl;
 import com.liuzhihang.doc.view.notification.DocViewNotification;
-import com.liuzhihang.doc.view.service.YApiService;
+import com.liuzhihang.doc.view.service.DocViewUploadService;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -38,26 +51,32 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @Service
-public class YApiServiceImpl implements YApiService {
+public class YApiServiceImpl implements DocViewUploadService {
+
 
     @Override
-    public void upload(@NotNull Project project, @NotNull List<DocView> docViewList) {
+    public boolean checkSettings(@NotNull Project project) {
 
+        YApiSettings apiSettings = YApiSettings.getInstance(project);
 
-        for (DocView docView : docViewList) {
-            // 循环处理保存到 yapi
-            upload(project, docView);
+        if (StringUtils.isBlank(apiSettings.getUrl())
+                || apiSettings.getProjectId() == null
+                || StringUtils.isBlank(apiSettings.getToken())) {
+            // 说明没有配置 YApi 上传地址, 跳转到配置页面
+            DocViewNotification.notifyError(project, DocViewBundle.message("notify.yapi.info.settings"));
+            ShowSettingsUtil.getInstance().showSettingsDialog(project, YApiSettingsConfigurable.class);
+            return false;
         }
-
+        return true;
     }
 
     @Override
-    public void upload(@NotNull Project project, @NotNull DocView docView) {
+    public void doUpload(@NotNull Project project, @NotNull DocView docView) {
 
         try {
             YApiSettings settings = YApiSettings.getInstance(project);
 
-            YApiFacadeService facadeService = ServiceManager.getService(YApiFacadeServiceImpl.class);
+            YApiFacadeService facadeService = ApplicationManager.getApplication().getService(YApiFacadeServiceImpl.class);
 
             YApiCat cat = getOrAddCat(settings, docView.getDocTitle());
 
@@ -67,7 +86,7 @@ public class YApiServiceImpl implements YApiService {
             save.setProjectId(settings.getProjectId());
             save.setCatId(cat.getId());
 
-            if (docView.getMethod().equals("Dubbo")) {
+            if ("Dubbo".equals(docView.getMethod())) {
                 // dubbo 接口处理
                 save.setPath("/Dubbo/" + docView.getPsiMethod().getName());
                 save.setMethod("POST");
@@ -76,26 +95,26 @@ public class YApiServiceImpl implements YApiService {
                 save.setPath(docView.getPath());
             }
             // 枚举: raw,form,json
-            save.setReqBodyType(docView.getReqExampleType());
+            save.setReqBodyType(docView.getContentType().toString().toLowerCase());
             save.setReqBodyForm(new ArrayList<>());
             save.setReqParams(new ArrayList<>());
             save.setReqHeaders(buildReqHeaders(docView.getHeaderList()));
             save.setReqQuery(buildReqQuery(docView.getReqParamList()));
             save.setResBodyType("json");
-            save.setResBody(buildJsonSchema(docView.getRespRootBody().getChildList()));
+            save.setResBody(buildJsonSchema(docView.getRespBody().getChildList()));
             save.setMarkdown(buildDesc(docView));
             save.setTitle(docView.getName());
 
-            if (docView.getReqExampleType().equals("json")) {
+            if (docView.getContentType().equals(ContentTypeEnum.JSON)) {
                 save.setReqBodyIsJsonSchema(true);
-                save.setReqBodyOther(buildJsonSchema(docView.getReqRootBody().getChildList()));
+                save.setReqBodyOther(buildJsonSchema(docView.getReqBody().getChildList()));
             }
 
             facadeService.save(save);
 
             String yapiInterfaceUrl = settings.getUrl() + "/project/" + settings.getProjectId() + "/interface/api/cat_" + cat.getId();
 
-            DocViewNotification.notifyInfo(project, DocViewBundle.message("notify.yapi.upload.success", yapiInterfaceUrl));
+            DocViewNotification.uploadSuccess(project, "YApi", yapiInterfaceUrl);
         } catch (Exception e) {
             DocViewNotification.notifyError(project, DocViewBundle.message("notify.yapi.upload.error", e.getMessage()));
             log.error("上传单个文档失败:{}", docView, e);
@@ -105,9 +124,6 @@ public class YApiServiceImpl implements YApiService {
 
     /**
      * 构造描述信息
-     *
-     * @param docView
-     * @return
      */
     @NotNull
     private String buildDesc(DocView docView) {
@@ -118,8 +134,8 @@ public class YApiServiceImpl implements YApiService {
                 + "**接口描述:**\n\n"
                 + docView.getDesc() + "\n\n"
                 + "**请求示例:**\n\n"
-                + "```" + docView.getReqExampleType() + "\n" +
-                (docView.getReqExample() == null ? "" : docView.getReqExample()) + "\n" +
+                + "```" + docView.getContentType() + "\n" +
+                (docView.getReqBodyExample() == null ? "" : docView.getReqBodyExample()) + "\n" +
                 "```" + "\n\n"
                 + "**返回示例:**\n\n"
                 + "```json\n" +
@@ -137,9 +153,6 @@ public class YApiServiceImpl implements YApiService {
      * properties: 字段列表
      * <p>
      * items: 数组类型时内部元素
-     *
-     * @param bodyList
-     * @return
      */
     private String buildJsonSchema(List<Body> bodyList) {
 
@@ -296,7 +309,7 @@ public class YApiServiceImpl implements YApiService {
     @NotNull
     private YApiCat getOrAddCat(@NotNull YApiSettings settings, @NotNull String name) throws Exception {
 
-        YApiFacadeService facadeService = ServiceManager.getService(YApiFacadeServiceImpl.class);
+        YApiFacadeService facadeService = ApplicationManager.getApplication().getService(YApiFacadeServiceImpl.class);
 
         // 检查 catId (菜单是否存在)
         List<YApiCat> catMenu = facadeService.getCatMenu(settings.getUrl(), settings.getProjectId(), settings.getToken());

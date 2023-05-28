@@ -13,17 +13,20 @@
     <depends>org.intellij.plugins.markdown</depends>
 
     <!-- 兼容 IDEA 版本 -->
-    <idea-version since-build="203"/>
+    <idea-version since-build="213"/>
 
     <extensions defaultExtensionNs="com.intellij">
         <!-- Add your extensions here -->
-
+        <!--Application 级别配置-->
+        <applicationService serviceImplementation="com.liuzhihang.doc.view.config.ApplicationSettings"/>
         <!-- 一个项目一个设置 -->
         <projectService serviceImplementation="com.liuzhihang.doc.view.config.Settings"/>
+        <projectService serviceImplementation="com.liuzhihang.doc.view.config.WindowSettings"/>
         <!-- 模版设置 -->
         <projectService serviceImplementation="com.liuzhihang.doc.view.config.TemplateSettings"/>
         <projectService serviceImplementation="com.liuzhihang.doc.view.config.YApiSettings"/>
         <projectService serviceImplementation="com.liuzhihang.doc.view.config.ShowDocSettings"/>
+        <projectService serviceImplementation="com.liuzhihang.doc.view.config.YuQueSettings"/>
 
         <!-- 相关服务 -->
         <applicationService serviceImplementation="com.liuzhihang.doc.view.service.impl.SpringDocViewServiceImpl"/>
@@ -32,9 +35,17 @@
         <applicationService serviceImplementation="com.liuzhihang.doc.view.service.impl.WriterService"/>
 
         <applicationService serviceImplementation="com.liuzhihang.doc.view.service.impl.YApiServiceImpl"/>
-        <applicationService serviceImplementation="com.liuzhihang.doc.view.facade.impl.YApiFacadeServiceImpl"/>
+        <applicationService serviceImplementation="com.liuzhihang.doc.view.integration.impl.YApiFacadeServiceImpl"/>
         <applicationService serviceImplementation="com.liuzhihang.doc.view.service.impl.ShowDocServiceImpl"/>
-        <applicationService serviceImplementation="com.liuzhihang.doc.view.facade.impl.ShowDocFacadeServiceImpl"/>
+        <applicationService serviceImplementation="com.liuzhihang.doc.view.integration.impl.ShowDocFacadeServiceImpl"/>
+        <applicationService serviceImplementation="com.liuzhihang.doc.view.service.impl.YuQueServiceImpl"/>
+        <applicationService serviceImplementation="com.liuzhihang.doc.view.integration.impl.YuQueFacadeServiceImpl"/>
+
+        <postStartupActivity implementation="com.liuzhihang.doc.view.notification.DocViewStartupNotification"/>
+
+        <!-- provider -->
+        <codeInsight.lineMarkerProvider language="JAVA"
+                                        implementationClass="com.liuzhihang.doc.view.provider.DocViewLineMarkerProvider"/>
 
         <!-- 配置为项目等级 全局为 applicationConfigurable -->
         <projectConfigurable instance="com.liuzhihang.doc.view.config.SettingsConfigurable"
@@ -60,10 +71,33 @@
                              groupId="liuzhihang.api.doc.SettingsConfigurable"
                              displayName="ShowDoc Settings"
                              nonDefaultProject="true"/>
+        <projectConfigurable instance="com.liuzhihang.doc.view.config.YuQueSettingsConfigurable"
+                             id="liuzhihang.api.doc.YuQueSettingsConfigurable"
+                             groupId="liuzhihang.api.doc.SettingsConfigurable"
+                             displayName="YuQue Settings"
+                             nonDefaultProject="true"/>
 
+        <toolWindow id="Doc View"
+                    icon="DocViewIcons.DOC_VIEW"
+                    anchor="right"
+                    secondary="false"
+                    doNotActivateOnStart="true"
+                    order="last"
+                    factoryClass="com.liuzhihang.doc.view.ui.window.DocViewToolWindowFactory"/>
 
         <!-- 2020.3 需要使用 notificationGroup 配置通知 -->
         <notificationGroup id="doc-view.NotificationGroup" displayType="BALLOON"/>
+
+        <!-- xml 解析的扩展, 解析 SpringBeans-->
+        <dom.fileMetaData implementation="com.liuzhihang.doc.view.dom.BeansDescription"/>
+        <!-- 范围搜索 -->
+        <definitionsScopedSearch implementation="com.liuzhihang.doc.view.dom.DubboDefinitionSearch"/>
+
+        <!-- 浮动按钮 -->
+        <!--<editorFloatingToolbarProvider-->
+        <!--        id="com.liuzhihang.doc.view.editor.floating"-->
+        <!--        order="after DefaultFloatingToolbarProvider"-->
+        <!--        implementation="com.liuzhihang.doc.view.ui.editor.EditorFloatingToolbarProvider"/>-->
 
     </extensions>
 
@@ -75,9 +109,6 @@
             <action id="liuzhihang.doc.view" class="com.liuzhihang.doc.view.action.PreviewAction"
                     text="Doc View"/>
             <action id="liuzhihang.doc.editor" class="com.liuzhihang.doc.view.action.EditorAction" text="Doc Editor"/>
-
-            <!-- 测试 JCEF 的浏览器 -->
-            <!--<action id="liuzhihang.doc.browser" class="com.liuzhihang.doc.view.action.WebBrowser" text="WebBrowser"/>-->
         </group>
 
         <group id="liuzhihang.doc.upload" text="Doc Upload" popup="true">
@@ -87,8 +118,110 @@
 
             <action id="liuzhihang.doc.showdoc.upload" class="com.liuzhihang.doc.view.action.ShowDocUploadAction"
                     text="Upload To ShowDoc"/>
+            <action id="liuzhihang.doc.yuque.upload" class="com.liuzhihang.doc.view.action.YuQueUploadAction"
+                    text="Upload To YuQue"/>
         </group>
 
+        <!-- preview 界面目录左下角toolbar -->
+        <group id="liuzhihang.doc.preview.toolbar.menu">
+            <action id="liuzhihang.doc.preview.toolbar.menu.export"
+                    class="com.liuzhihang.doc.view.action.toolbar.preview.MenuExportAllAction"
+                    text="Export All" description="Export markdown" icon="AllIcons.Ide.IncomingChangesOn"/>
+            <action id="liuzhihang.doc.preview.toolbar.menu.upload"
+                    class="com.liuzhihang.doc.view.action.toolbar.preview.MenuUploadAllAction"
+                    text="Upload All" description="Upload all doc view" icon="AllIcons.Ide.OutgoingChangesOn"/>
+        </group>
+
+        <!-- preview 界面目录右下角 右侧toolbar -->
+        <group id="liuzhihang.doc.preview.toolbar.right">
+            <action id="liuzhihang.doc.preview.toolbar.right.upload"
+                    class="com.liuzhihang.doc.view.action.toolbar.preview.PreviewRightUploadAction"
+                    text="Upload" description="Upload doc view" icon="AllIcons.Actions.Upload"/>
+            <action id="liuzhihang.doc.preview.toolbar.right.export"
+                    class="com.liuzhihang.doc.view.action.toolbar.preview.PreviewRightExportAction"
+                    text="Export" description="Export markdown" icon="AllIcons.ToolbarDecorator.Export"/>
+            <action id="liuzhihang.doc.preview.toolbar.toolbar.copy"
+                    class="com.liuzhihang.doc.view.action.toolbar.preview.PreviewRightCopyAction"
+                    text="Copy" description="Copy" icon="AllIcons.Actions.Copy"/>
+        </group>
+
+        <!-- editor 右键菜单 -->
+        <group id="liuzhihang.doc.preview.editor.floating">
+
+            <action id="liuzhihang.doc.preview.editor.save" class="com.liuzhihang.doc.view.action.toolbar.preview.MenuExportAllAction"
+                    text="Save" icon="AllIcons.Actions.MenuSaveall"/>
+
+        </group>
+
+
+        <!-- ToolWindow 的工具栏  -->
+        <group id="liuzhihang.doc.tool.window.toolbar.action">
+
+            <action id="liuzhihang.doc.tool.window.toolbar.action.refresh"
+                    class="com.liuzhihang.doc.view.action.toolbar.window.WindowRefreshAction"
+                    text="Refresh" description="Refresh" icon="AllIcons.Actions.Refresh"/>
+            <separator/>
+            <action id="liuzhihang.doc.tool.window.toolbar.action.export"
+                    class="com.liuzhihang.doc.view.action.toolbar.window.WindowExportAction"
+                    text="Export" description="Export" icon="AllIcons.ToolbarDecorator.Export"/>
+            <action id="liuzhihang.doc.tool.window.toolbar.action.upload"
+                    class="com.liuzhihang.doc.view.action.toolbar.window.WindowUploadAction"
+                    text="Upload" description="Collapse" icon="AllIcons.Actions.Upload"/>
+
+            <separator/>
+            <action id="liuzhihang.doc.tool.window.toolbar.action.expand"
+                    class="com.liuzhihang.doc.view.action.toolbar.window.WindowExpandAction"
+                    text="Expand" description="Expand" icon="AllIcons.Actions.Expandall"/>
+            <action id="liuzhihang.doc.tool.window.toolbar.action.collapse"
+                    class="com.liuzhihang.doc.view.action.toolbar.window.WindowCollapseAction"
+                    text="Collapse" description="Collapse" icon="AllIcons.Actions.Collapseall"/>
+
+            <separator/>
+            <action id="liuzhihang.doc.tool.window.toolbar.action.clear"
+                    class="com.liuzhihang.doc.view.action.toolbar.window.WindowClearAction"
+                    text="Clear Cache" description="ClearCache" icon="DocViewIcons.CLEAR"/>
+            <separator/>
+            <action id="liuzhihang.doc.tool.window.toolbar.action.setting"
+                    class="com.liuzhihang.doc.view.action.toolbar.window.WindowSettingsAction"
+                    text="Settings" description="Settings" icon="AllIcons.General.Settings"/>
+            <separator/>
+
+        </group>
+
+
+        <!-- ToolWindow 目录右键菜单  -->
+        <group id="liuzhihang.doc.tool.window.catalog.action">
+
+            <action id="liuzhihang.doc.tool.window.catalog.action.open"
+                    class="com.liuzhihang.doc.view.action.toolbar.window.catalog.CatalogOpenAction"
+                    text="Open" description="Open" icon="AllIcons.Toolwindows.Documentation"/>
+
+            <action id="liuzhihang.doc.tool.window.catalog.action.export"
+                    class="com.liuzhihang.doc.view.action.toolbar.window.catalog.CatalogExportAction"
+                    text="Export" description="Export" icon="AllIcons.ToolbarDecorator.Export"/>
+
+            <group id="liuzhihang.doc.tool.window.catalog.action.upload" popup="true" text="Upload" description="Upload"
+                   icon="AllIcons.Actions.Upload">
+                <action id="liuzhihang.doc.tool.window.catalog.action.upload.yapi"
+                        class="com.liuzhihang.doc.view.action.toolbar.window.catalog.CatalogUploadYApiAction"
+                        text="YApi" description="YApi"/>
+                <action id="liuzhihang.doc.tool.window.catalog.action.upload.showdoc"
+                        class="com.liuzhihang.doc.view.action.toolbar.window.catalog.CatalogUploadShowDocAction"
+                        text="ShowDoc" description="ShowDoc"/>
+                <action id="liuzhihang.doc.tool.window.catalog.action.upload.yuque"
+                        class="com.liuzhihang.doc.view.action.toolbar.window.catalog.CatalogUploadYuQueAction"
+                        text="语雀" description="语雀"/>
+            </group>
+            <separator/>
+            <action id="liuzhihang.doc.tool.window.catalog.action.clear"
+                    class="com.liuzhihang.doc.view.action.toolbar.window.catalog.CatalogClearAction"
+                    text="Clear" description="ClearCache" icon="DocViewIcons.CLEAR"/>
+
+            <action id="liuzhihang.doc.view.action.toolbar.window.catalog.httpclient"
+                    class="com.liuzhihang.doc.view.action.toolbar.window.catalog.CatalogHttpClientAction" text="Http Client"
+                    description="Generate http client" icon="AllIcons.General.Web">
+            </action>
+        </group>
 
     </actions>
 </idea-plugin>

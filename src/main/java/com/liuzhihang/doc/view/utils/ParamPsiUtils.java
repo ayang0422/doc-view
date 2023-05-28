@@ -125,6 +125,9 @@ public class ParamPsiUtils {
             childClass = fieldClass;
         }
 
+        if (type instanceof PsiPrimitiveType || FieldTypeConstant.FIELD_TYPE.containsKey(type.getPresentableText())) {
+            return;
+        }
         for (PsiField psiField : childClass.getAllFields()) {
             if (!DocViewUtils.isExcludeField(psiField)) {
                 buildBodyParam(psiField, fieldGenericsMap, parentBody);
@@ -196,12 +199,12 @@ public class ParamPsiUtils {
     }
 
     @NotNull
-    private static Body buildFieldGenericsBody(String name, PsiClass GenericsClass, Body parent) {
+    private static Body buildFieldGenericsBody(String name, PsiClass genericsClass, Body parent) {
         Body listBody = new Body();
         listBody.setRequired(true);
         listBody.setName(name);
-        listBody.setPsiElement(GenericsClass);
-        listBody.setType(GenericsClass.getName());
+        listBody.setPsiElement(genericsClass);
+        listBody.setType(genericsClass.getName());
         listBody.setDesc("");
         listBody.setParent(parent);
 
