@@ -1,5 +1,7 @@
 package com.liuzhihang.doc.view.service.impl;
 
+import com.intellij.openapi.module.Module;
+import com.intellij.openapi.module.ModuleUtil;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiMethod;
 import com.intellij.psi.PsiParameter;
@@ -53,7 +55,11 @@ public class SpringDocViewServiceImpl implements DocViewService {
     @Override
     public DocView buildClassMethodDoc(PsiClass psiClass, @NotNull PsiMethod psiMethod) {
 
+        // 查找某个psiFile所属的Module
+        Module module = ModuleUtil.findModuleForPsiElement(psiClass);
+
         DocView docView = new DocView();
+        docView.setModule(module);
         docView.setPsiClass(psiClass);
         docView.setPsiMethod(psiMethod);
         docView.setDocTitle(DocViewUtils.getTitle(psiClass));

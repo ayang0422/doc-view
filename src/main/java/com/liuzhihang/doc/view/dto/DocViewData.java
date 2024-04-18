@@ -84,7 +84,7 @@ public class DocViewData {
      * 返回参数
      */
     private final List<DocViewParamData> responseParamDataList;
-    private final String                 responseParam;
+    private final String responseParam;
 
     /**
      * 返回示例
@@ -148,7 +148,7 @@ public class DocViewData {
             return "";
         }
 
-        return "|参数名|类型|必选|描述|\n"
+        return "|参数名|必填|字段类型|描述|\n"
                 + "|:-----|:-----|:-----|:-----|\n"
                 + paramMarkdownContent(dataList);
     }
@@ -162,8 +162,8 @@ public class DocViewData {
 
         for (DocViewParamData data : dataList) {
             builder.append("|").append(data.getPrefixSymbol1()).append(data.getPrefixSymbol2()).append(data.getName())
+                    .append("|").append(data.getRequired() ? "是" : "否")
                     .append("|").append(data.getType())
-                    .append("|").append(data.getRequired() ? "Y" : "N")
                     .append("|").append(data.getDesc())
                     .append("|").append("\n");
             if (CollectionUtils.isNotEmpty(data.getChildList())) {
@@ -276,11 +276,8 @@ public class DocViewData {
             data.setPrefixSymbol2(prefixSymbol2);
 
             if (CollectionUtils.isNotEmpty(body.getChildList())) {
-
                 Settings settings = Settings.getInstance(body.getPsiElement().getProject());
-
-                data.setChildList(
-                        buildBodyDataList(body.getChildList(), settings.getPrefixSymbol1(), prefixSymbol2 + settings.getPrefixSymbol2()));
+                data.setChildList(buildBodyDataList(body.getChildList(), settings.getPrefixSymbol1(),  body.getName() + "."));
             }
             dataList.add(data);
         }

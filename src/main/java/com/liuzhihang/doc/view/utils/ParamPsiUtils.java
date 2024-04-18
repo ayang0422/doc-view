@@ -69,7 +69,7 @@ public class ParamPsiUtils {
         // 判断 childClass 是否已经在根节点到当前节点的链表上存在, 存在的话则不继续递归
         String qualifiedName = fieldClass.getQualifiedName();
 
-        if (StringUtils.isBlank(qualifiedName) || checkLinkedListHasTypeClass(body, qualifiedName)) {
+        if (StringUtils.isBlank(qualifiedName) || checkLinkedListHasTypeClass(body, qualifiedName, type)) {
             return;
         }
 
@@ -91,7 +91,7 @@ public class ParamPsiUtils {
             }
             // 集合参数构建, 集合就一个参数, 泛型 E
             fieldGenericsMap = CustomPsiUtils.getGenericsMap((PsiClassType) iterableType);
-            parentBody = buildFieldGenericsBody("element", childClass, body);
+            parentBody = buildFieldGenericsBody(field.getName(), childClass, body);
 
 
         } else if (InheritanceUtil.isInheritor(type, CommonClassNames.JAVA_UTIL_MAP)) {
@@ -241,6 +241,39 @@ public class ParamPsiUtils {
         Body temp = body.getParent();
 
         while (temp != null) {
+            // 需要去除jdk的集合、数组等
+
+            if (qualifiedName.equals(temp.getQualifiedNameForClassType())) {
+                return true;
+            }
+            temp = temp.getParent();
+        }
+
+        return false;
+
+    }
+
+    /**
+     * 检查从当前节点到根节点的链表上是否存在当前类型的节点, 存在则说明递归了
+     * <p>
+     * 排除多个List，Map类型只能递归到第一个集合
+     *
+     * @param body
+     * @param qualifiedName
+     * @param type
+     * @return
+     */
+    public static boolean checkLinkedListHasTypeClass(@NotNull Body body, @NotNull String qualifiedName, @NotNull PsiType type) {
+        if (InheritanceUtil.isInheritor(type, CommonClassNames.JAVA_UTIL_COLLECTION) ||
+                InheritanceUtil.isInheritor(type, CommonClassNames.JAVA_UTIL_MAP)) {
+            return false;
+        }
+
+        Body temp = body.getParent();
+
+        while (temp != null) {
+            // 需要去除jdk的集合、数组等
+
             if (qualifiedName.equals(temp.getQualifiedNameForClassType())) {
                 return true;
             }

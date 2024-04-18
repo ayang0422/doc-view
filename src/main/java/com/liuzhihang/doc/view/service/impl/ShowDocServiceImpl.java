@@ -53,7 +53,7 @@ public final class ShowDocServiceImpl implements DocViewUploadService {
             request.setShowDocUrl(settings.getUrl());
             request.setApiKey(settings.getApiKey());
             request.setApiToken(settings.getApiToken());
-            request.setCatName(docView.getDocTitle());
+            request.setCatName(docView.getModule().getName() + "/" + docView.getDocTitle());
             request.setPageTitle(docView.getName());
             request.setPageContent(DocViewData.markdownText(project, docView));
 

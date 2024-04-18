@@ -1,5 +1,6 @@
 package com.liuzhihang.doc.view.dto;
 
+import com.intellij.openapi.module.Module;
 import com.intellij.psi.PsiClass;
 import com.intellij.psi.PsiMethod;
 import com.liuzhihang.doc.view.enums.ContentTypeEnum;
@@ -16,6 +17,11 @@ import java.util.List;
  */
 @Data
 public class DocView {
+
+    /**
+     * 所属模块
+     */
+    private Module module;
 
     /**
      * 当前接口所在的类
